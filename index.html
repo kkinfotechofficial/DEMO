@@ -50,6 +50,7 @@ label{font-size:13px;font-weight:700;color:#374151}.error{color:#dc2626;font-siz
       <button onclick="showPage('dc',this)">🚚 <span>Delivery Challan</span></button>
       <button onclick="showPage('settings',this)" id="settingsNav">⚙️ <span>Company Settings</span></button>
       <button onclick="showPage('users',this)" id="usersNav">🔐 <span>User Management</span></button>
+      <button onclick="showPage('userLogs',this)" id="userLogsNav">📝 <span>User Logs</span></button>
     </div>
   </aside>
   <main class="main">
@@ -103,6 +104,25 @@ label{font-size:13px;font-weight:700;color:#374151}.error{color:#dc2626;font-siz
       <div id="users" class="page hidden">
         <div class="panel"><div class="toolbar"><h3>User Management</h3><button class="primary" onclick="userForm()">+ Add User</button></div><div id="userTable"></div></div>
       </div>
+
+      <div id="userLogs" class="page hidden">
+        <div class="panel">
+          <div class="toolbar"><h3>📝 User Logs</h3><div class="actions"><b id="userLogsCount">0 Logs</b></div></div>
+          <div class="formgrid" style="margin-bottom:12px">
+            <div><label>From Date</label><input id="logFrom" type="date"></div>
+            <div><label>To Date</label><input id="logTo" type="date"></div>
+            <div><label>Username</label><select id="logUsername"><option value="">All Users</option></select></div>
+            <div><label>Action</label><select id="logAction"><option value="">All Actions</option></select></div>
+          </div>
+          <div class="actions" style="margin-bottom:14px">
+            <button class="primary" onclick="loadUserLogs()">🔎 Filter</button>
+            <button class="secondary" onclick="clearUserLogFilters()">✕ Clear</button>
+            <button class="success" onclick="exportUserLogs()">⬇ Export CSV</button>
+            <button class="secondary" onclick="printUserLogs()">🖨 Print</button>
+          </div>
+          <div id="userLogsTable"><p style="color:#64748b">Loading logs...</p></div>
+        </div>
+      </div>
     </section>
   </main>
 </div>
@@ -111,7 +131,7 @@ label{font-size:13px;font-weight:700;color:#374151}.error{color:#dc2626;font-siz
 
 <script>
 const API_URL = "https://script.google.com/macros/s/AKfycby-mmcA0_maoozPr9wsHzumhlzA0yOLHju9uba7X9X9SzFX2d68-WSxr7mGNKp9VftV/exec";
-let db={products:[],stock:[],parties:[],invoices:[],pi:[],mr:[],dc:[],users:[],company:{name:"MASOOM ENTERPRISE",address:"DR.M.N.GHOSH ROAD,NABI NAGAR,RANIGANJ BARDHAMAN WB PIN-713347",contact:"7063137572"}}, currentUser=null;
+let db={products:[],stock:[],parties:[],invoices:[],pi:[],mr:[],dc:[],users:[],logs:[],company:{name:"MASOOM ENTERPRISE",address:"DR.M.N.GHOSH ROAD,NABI NAGAR,RANIGANJ BARDHAMAN WB PIN-713347",contact:"7063137572"}}, currentUser=null;
 
 async function api(action,data={}){
   if(API_URL.includes("PASTE_")) return localDemo(action,data);
@@ -163,32 +183,36 @@ async function login(){
 function logout(){sessionStorage.removeItem("kk_user");location.reload()}
 async function loadData(){
   const r=await api("getData",{});
-  if(r.data){db=r.data;db.products??=[];db.stock??=[];db.parties??=[];db.invoices??=[];db.pi??=[];db.mr??=[];db.dc??=[];db.users??=[];db.company??={name:"MASOOM ENTERPRISE",address:"",contact:""}}
+  if(r.data){db=r.data;db.products??=[];db.stock??=[];db.parties??=[];db.invoices??=[];db.pi??=[];db.mr??=[];db.dc??=[];db.users??=[];db.logs??=[];db.company??={name:"MASOOM ENTERPRISE",address:"",contact:""}}
   renderAll();
 }
 function renderAll(){sProducts.textContent=db.products.length;sStock.textContent=db.products.reduce((a,p)=>a+Number(p.stock||0),0);sInvoices.textContent=db.invoices.length;sLow.textContent=db.products.filter(p=>Number(p.stock||0)<=Number(p.minStock||0)).length;renderProducts();renderStock();renderParties();renderInvoices();renderPI();renderMR();renderDC();renderUsers();renderCompanySettings();fillStockProducts();if(isAdmin()){salesReportPanel.classList.remove('hidden');if(!reportFrom.value)reportFrom.value=new Date(new Date().getFullYear(),0,1).toISOString().slice(0,10);if(!reportTo.value)reportTo.value=todayISO();refreshSalesReport()}else salesReportPanel.classList.add('hidden')}
 function showPage(id,btn){
   const restricted=["dashboard","products","stock"];
   if(restricted.includes(id) && !isAdmin()) return;
+  if((id==="users"||id==="settings"||id==="userLogs") && !isDeveloper()) return;
   document.querySelectorAll(".page").forEach(x=>x.classList.add("hidden"));
   const page=document.getElementById(id);
   if(!page)return;
   page.classList.remove("hidden");
   document.querySelectorAll(".nav button").forEach(x=>x.classList.remove("active"));
   if(btn)btn.classList.add("active");
-  pageTitle.textContent=id==="stock"?"Stock In / Out":id==='pi'?'PI / Quotation':id==='mr'?'MR / Money Receipt':id==='dc'?'Delivery Challan':id==='settings'?'Company Settings':id[0].toUpperCase()+id.slice(1);
+  pageTitle.textContent=id==="stock"?"Stock In / Out":id==='pi'?'PI / Quotation':id==='mr'?'MR / Money Receipt':id==='dc'?'Delivery Challan':id==='settings'?'Company Settings':id==='userLogs'?'User Logs':id[0].toUpperCase()+id.slice(1);
+  if(id==='userLogs'&&isDeveloper()) loadUserLogs();
 }
 function applyRoleVisibility(){
   const admin=isAdmin();
   [dashboardNav,productsNav,stockNav].forEach(el=>{if(el)el.style.display=admin?"block":"none"});
-  usersNav.style.display=currentUser?.role==="software_developer"?"block":"none";
-  settingsNav.style.display=currentUser?.role==="software_developer"?"block":"none";
+  usersNav.style.display=isDeveloper()?"block":"none";
+  settingsNav.style.display=isDeveloper()?"block":"none";
+  userLogsNav.style.display=isDeveloper()?"block":"none";
   if(!admin){document.getElementById("dashboard")?.classList.add("hidden");}
 }
 
 function closeModal(){modal.classList.add("hidden")}
 function openModal(html){modalBox.innerHTML=html;modal.classList.remove("hidden")}
 function isAdmin(){return ["company_owner","software_developer"].includes(currentUser?.role)}
+function isDeveloper(){return currentUser?.role==="software_developer"}
 function canEditCompany(){return currentUser?.role==="software_developer"}
 function formatDateOnly(v){if(!v)return "";const m=String(v).match(/(\\d{4})[-\\/](\\d{1,2})[-\\/](\\d{1,2})/);if(m)return `${m[1]}-${String(m[2]).padStart(2,"0")}-${String(m[3]).padStart(2,"0")}`;const d=new Date(v);return isNaN(d)?String(v):d.toISOString().slice(0,10)}
 function todayISO(){return new Date().toISOString().slice(0,10)}
@@ -295,6 +319,48 @@ async function resetPassword(id,name){const password=prompt('Enter new password 
 async function deleteUser(id){if(!confirm('Delete this user?'))return;const r=await api('deleteUser',{id});if(r.ok)await loadData();else alert(r.message||'Delete failed')}
 function renderUsers(){if(currentUser?.role!=='software_developer'){userTable.innerHTML="";return}userTable.innerHTML=`<table><tr><th>Username</th><th>Name</th><th>Role</th><th>Action</th></tr>${(db.users||[]).map(u=>`<tr><td>${esc(u.username)}</td><td>${esc(u.name)}</td><td>${esc(u.role)}</td><td><button class="secondary" onclick='userForm(${JSON.stringify(u)})'>Edit</button> <button class="secondary" onclick="resetPassword('${u.id}','${esc(u.name)}')">Reset Password</button> ${String(u.id)!==String(currentUser.id)?`<button class="danger" onclick="deleteUser('${u.id}')">Delete</button>`:''}</td></tr>`).join('')}</table>`}
 function salesReportRows(){const from=reportFrom?.value||'',to=reportTo?.value||'';return db.invoices.filter(i=>(!from||String(i.date)>=from)&&(!to||String(i.date)<=to)).map(i=>{const sales=invoiceNet(i),tax=invoiceTax(i),cost=(i.items||[]).reduce((a,x)=>{const p=db.products.find(p=>String(p.id)===String(x.productId));return a+Number(x.qty||0)*Number(p?.buy||0)},0);return {no:i.no,date:i.date,customer:db.parties.find(p=>String(p.id)===String(i.partyId))?.name||'',sales,tax,cost,profit:sales-cost,total:sales+tax}})}
+async function loadUserLogs(){
+  if(!isDeveloper())return;
+  const r=await api('getUserLogs',{from:logFrom.value||'',to:logTo.value||'',username:logUsername.value||'',logAction:logAction.value||''});
+  if(!r.ok){alert(r.message||'Unable to load user logs');return}
+  db.logs=r.logs||[];
+  const usernames=[...new Set(db.logs.map(x=>x.username).filter(Boolean))].sort();
+  const actions=[...new Set(db.logs.map(x=>x.action).filter(Boolean))].sort();
+  const oldUser=logUsername.value,oldAction=logAction.value;
+  logUsername.innerHTML='<option value="">All Users</option>'+usernames.map(x=>`<option value="${esc(x)}">${esc(x)}</option>`).join('');
+  logAction.innerHTML='<option value="">All Actions</option>'+actions.map(x=>`<option value="${esc(x)}">${esc(x)}</option>`).join('');
+  if(usernames.includes(oldUser))logUsername.value=oldUser;
+  if(actions.includes(oldAction))logAction.value=oldAction;
+  renderUserLogs();
+}
+function renderUserLogs(){
+  if(!isDeveloper())return;
+  userLogsCount.textContent=`${db.logs.length} Log${db.logs.length===1?'':'s'}`;
+  if(!db.logs.length){userLogsTable.innerHTML='<p style="color:#64748b">No logs found for the selected filters.</p>';return}
+  userLogsTable.innerHTML=`<div style="overflow:auto"><table><tr><th>#</th><th>Date & Time</th><th>Username</th><th>Role</th><th>Action</th><th>Status</th><th>Details</th></tr>${db.logs.map((x,i)=>`<tr><td>${i+1}</td><td>${esc(x.timestamp)}</td><td>${esc(x.username)}</td><td>${esc(x.role)}</td><td>${esc(x.action)}</td><td>${esc(x.status)}</td><td>${esc(x.details||'')}</td></tr>`).join('')}</table></div>`;
+}
+function clearUserLogFilters(){
+  if(!isDeveloper())return;
+  logFrom.value='';logTo.value='';logUsername.value='';logAction.value='';
+  loadUserLogs();
+}
+function csvCell(v){return '"'+String(v??'').replace(/"/g,'""')+'"'}
+function exportUserLogs(){
+  if(!isDeveloper())return;
+  if(!db.logs.length){alert('No logs to export.');return}
+  const rows=[['Date & Time','Username','Role','Action','Status','Details'],...db.logs.map(x=>[x.timestamp,x.username,x.role,x.action,x.status,x.details])];
+  const csv='\ufeff'+rows.map(r=>r.map(csvCell).join(',')).join('\r\n');
+  const blob=new Blob([csv],{type:'text/csv;charset=utf-8'}),a=document.createElement('a');a.href=URL.createObjectURL(blob);a.download='KK_INFOTECH_User_Logs.csv';a.click();setTimeout(()=>URL.revokeObjectURL(a.href),1000);
+}
+function printUserLogs(){
+  if(!isDeveloper())return;
+  if(!db.logs.length){alert('No logs to print.');return}
+  const c=db.company||{},from=logFrom.value||'All',to=logTo.value||'All';
+  const rows=db.logs.map(x=>`<tr><td>${esc(x.timestamp)}</td><td>${esc(x.username)}</td><td>${esc(x.role)}</td><td>${esc(x.action)}</td><td>${esc(x.status)}</td><td>${esc(x.details||'')}</td></tr>`).join('');
+  const html=`<html><head><title>${esc(c.name||'KK INFOTECH')} - User Logs</title><style>body{font-family:Arial,sans-serif;padding:20px;color:#111}.head{text-align:center;border-bottom:2px solid #222;padding-bottom:10px;margin-bottom:15px}.head h2{margin:0 0 5px}.head div{font-size:12px;margin:2px}.title{text-align:center;font-size:18px;font-weight:bold;margin:10px}.period{text-align:center;font-size:12px;margin-bottom:15px}table{width:100%;border-collapse:collapse}th,td{border:1px solid #555;padding:6px;font-size:10px;vertical-align:top}th{font-weight:bold}@media print{button{display:none}}</style></head><body><div class="head"><h2>${esc(c.name||'KK INFOTECH')}</h2><div>${esc(c.address||'').replace(/\\n/g,'<br>')}</div><div>Contact: ${esc(c.contact||'')}</div></div><div class="title">User Activity Logs</div><div class="period">Period: ${esc(from)} to ${esc(to)}</div><table><tr><th>Date & Time</th><th>Username</th><th>Role</th><th>Action</th><th>Status</th><th>Details</th></tr>${rows}</table></body></html>`;
+  const w=window.open('','_blank');if(!w){alert('Please allow pop-ups to print user logs.');return}w.document.open();w.document.write(html);w.document.close();setTimeout(()=>w.print(),300);
+}
+
 function refreshSalesReport(){if(!isAdmin())return;const rows=salesReportRows(),sales=rows.reduce((a,r)=>a+r.sales,0),tax=rows.reduce((a,r)=>a+r.tax,0),cost=rows.reduce((a,r)=>a+r.cost,0),profit=sales-cost;rSales.textContent='₹'+sales.toFixed(2);rTax.textContent='₹'+tax.toFixed(2);rCost.textContent='₹'+cost.toFixed(2);rProfit.textContent='₹'+profit.toFixed(2);rProfit.style.color=profit<0?'#dc2626':'#16a34a';salesReportTable.innerHTML=`<table><tr><th>Date</th><th>Invoice</th><th>Customer</th><th>Sales</th><th>Tax</th><th>Cost</th><th>Profit / Loss</th><th>Total</th></tr>${rows.map(r=>`<tr><td>${esc(r.date)}</td><td>${esc(r.no)}</td><td>${esc(r.customer)}</td><td>₹${r.sales.toFixed(2)}</td><td>₹${r.tax.toFixed(2)}</td><td>₹${r.cost.toFixed(2)}</td><td>₹${r.profit.toFixed(2)}</td><td>₹${r.total.toFixed(2)}</td></tr>`).join('')}</table>`}
 function exportSalesExcel(){if(!isAdmin())return;const rows=salesReportRows();let html='<table><tr><th>Date</th><th>Invoice</th><th>Customer</th><th>Sales</th><th>Tax</th><th>Cost</th><th>Profit/Loss</th><th>Total</th></tr>';rows.forEach(r=>html+=`<tr><td>${esc(r.date)}</td><td>${esc(r.no)}</td><td>${esc(r.customer)}</td><td>${r.sales.toFixed(2)}</td><td>${r.tax.toFixed(2)}</td><td>${r.cost.toFixed(2)}</td><td>${r.profit.toFixed(2)}</td><td>${r.total.toFixed(2)}</td></tr>`);html+='</table>';const blob=new Blob([`<html><body>${html}</body></html>`],{type:'application/vnd.ms-excel'}),a=document.createElement('a');a.href=URL.createObjectURL(blob);a.download='KK_INFOTECH_Sales_Report.xls';a.click();setTimeout(()=>URL.revokeObjectURL(a.href),1000)}
 function printSalesReport(){if(!isAdmin())return;refreshSalesReport();const from=reportFrom.value||"",to=reportTo.value||"";const company=db.company||{};const companyName=company.name||"KK INFOTECH";const companyAddress=company.address||"";const companyContact=company.contact||"";const html=`<html><head><title>${esc(companyName)} - Profit / Loss Report</title><style>body{font-family:Arial,sans-serif;padding:20px;color:#111} .company{text-align:center;border-bottom:2px solid #222;padding-bottom:10px;margin-bottom:15px}.company h2{margin:0 0 5px;font-size:22px}.company div{margin:2px 0;font-size:13px}.report-title{text-align:center;margin:8px 0 4px;font-size:18px;font-weight:bold}.period{text-align:center;margin:3px 0 18px;font-size:12px}table{width:100%;border-collapse:collapse}th,td{border:1px solid #555;padding:7px;font-size:11px}th{font-weight:bold}td{text-align:right}td:nth-child(1),td:nth-child(2),td:nth-child(3){text-align:left}.summary{display:flex;gap:20px;margin:15px 0}.box{border:1px solid #777;padding:10px;flex:1}.box b{display:block;font-size:16px;margin-top:5px}@media print{button{display:none}}</style></head><body><div class="company"><h2>${esc(companyName)}</h2>${companyAddress?`<div>${esc(companyAddress).replace(/\\n/g,"<br>")}</div>`:""}${companyContact?`<div>Contact: ${esc(companyContact)}</div>`:""}</div><div class="report-title">Sales & Profit / Loss Report</div><div class="period">Period: ${esc(from)} to ${esc(to)}</div>${salesReportTable.innerHTML}</body></html>`;const w=window.open("","_blank");if(!w){alert("Please allow pop-ups to print the report.");return}w.document.open();w.document.write(html);w.document.close();setTimeout(()=>w.print(),300)}
